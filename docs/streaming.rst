@@ -1,51 +1,65 @@
-=================
-Streaming tactics **
-=================
+===================
+Stream manipulation
+===================
 
 .. note::
 
-    Certain constructs are available only for seekable streams (in-memory and files) and some require tellable streams (which in fact is a subset of seekability). Sockets and pipes do not support seeking, so you'll have to first read the data from the stream, and parse it in-memory, or use the :func:`~construct.core.Rebuffered` wrapper.
+    Certain constructs are available only for seekable or tellable streams (in-memory and files). Sockets and pipes do not support neither, so you'll have to first read the data from the stream and parse it in-memory, or use experimental :class:`~construct.core.Rebuffered` wrapper.
 
-Wrappers
-========
 
-Pointer
--------
+Field wrappers
+==============
 
-Pointer allows for non-sequential construction. The pointer first changes the stream position, does the construction, and restores the original stream position.
+Pointer allows for non-sequential construction. The pointer first moves the stream into new position, does the construction, and then restores the stream back to original position. This allows for random-access within the stream.
 
->>> Pointer(8, Bytes(1)).parse(b"abcdefghijkl")
+>>> d = Pointer(8, Bytes(1))
+>>> d.parse(b"abcdefghijkl")
 b'i'
->>> Pointer(8, Bytes(1)).build(b"x")
-b'\x00\x00\x00\x00\x00\x00\x00\x00x'
+>>> d.build(b"Z")
+b'\x00\x00\x00\x00\x00\x00\x00\x00Z'
 
-Peek
-----
+Peek parses a field but restores the stream position afterwards (it does peeking). Building does nothing, it does NOT defer to subcon.
 
-Parses the subconstruct but restores the stream position afterwards (it does "peeking").
-
->>> Sequence(Peek(Byte), Peek(Int16ub)).parse(b"\x01\x02")
+>>> d = Sequence(Peek(Int8ub), Peek(Int16ub))
+>>> d.parse(b"\x01\x02")
 [1, 258]
-
+>>> d.sizeof()
+0
 
 
 Pure side effects
 =================
 
-Seek makes a jump within the stream and leaves it at that point. It does not read or write anything to the stream by itself.
+Seek makes a jump within the stream and leaves it there, for other constructs to follow up from that location. It does not read or write anything to the stream by itself.
 
-.. autoclass:: construct.core.Seek
+>>> d = (Bytes(10) >> Seek(5) >> Byte)
+>>> d.build([b"0123456789", None, 255])
+b'01234\xff6789'
 
-Tell checks the current stream position and returns it, also putting it into the context. It does not read or write anything to the stream by itself.
+Tell checks the current stream position and returns it. The returned value gets automatically inserted into the context dictionary. It also does not read or write anything to the stream by itself.
 
-.. autofunction:: construct.core.Tell
-
-
-Stream manipulation
-===================
-
-.. autofunction:: construct.core.Rebuffered
-
-.. autofunction:: construct.core.Restreamed
+>>> d = Struct("num"/VarInt, "offset"/Tell)
+>>> d.parse(b"X")
+Container(num=88)(offset=1)
+>>> d.build(dict(num=88))
+b'X'
 
 
+Other fields
+=================
+
+Pass literally does nothing. It can be useful as default case in Switch, its also used internally by If(IfThenElse) and Padding(Padded).
+
+>>> Pass.parse(b"")
+None
+>>> Pass.build(None)
+b''
+>>> Pass.sizeof()
+0
+
+Terminated only works during parsing. It checks if the stream reached EOF and raises error if not.
+
+>>> Terminated.parse(b"")
+None
+>>> Terminated.parse(b"remaining")
+construct.core.TerminatedError: expected end of stream

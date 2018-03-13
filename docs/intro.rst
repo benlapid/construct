@@ -2,45 +2,74 @@
 Introduction
 ============
 
-What is Construct?
-==================
+Construct is a powerful **declarative** and **symmetrical** parser and builder for binary data.
 
-In a nutshell, Construct is a declarative binary parser and builder library. To break that down into each different part, Construct is...
+Instead of writing *imperative code* to parse a piece of data, you declaratively define a *data structure* that describes your data. As this data structure is not code, you can use it in one direction to *parse* data into Pythonic objects, and in the other direction, to *build* objects into binary data.
 
-Declarative
------------
+The library provides both simple, atomic constructs (such as integers of various sizes), as well as composite ones which allow you form hierarchical and sequential structures of increasing complexity. Construct features **bit and byte granularity**, easy debugging and testing, an **easy-to-extend subclass system**, and lots of primitive constructs to make your work easier:
 
-Construct does not force users to write code in order to create parsers and builders. Instead, Construct gives users a **domain-specific language**, or DSL, for specifying their data structures.
+* Fields: raw bytes or numerical types
+* Structs and Sequences: combine simpler constructs into more complex ones
+* Bitwise: splitting bytes into bit-grained fields
+* Adapters: change how data is represented
+* Arrays/Ranges: duplicate constructs
+* Meta-constructs: use the context (history) to compute the size of data
+* If/Switch: branch the computational path based on the context
+* On-demand (lazy) parsing: read and parse only the fields what you require
+* Pointers: jump from here to there in the data stream
+* Tunneling: prefix data with a byte count or compress it
 
-Binary
-------
 
-Construct operates on bytes, not strings, and is specialized for binary data. In the past, there was an experimental support for parsing text but it was dropped in version 2.5.
+Example
+---------
 
-Parser and Builder
-------------------
+A ``Struct`` is a collection of ordered, named fields::
 
-Structures declared in Construct are symmetrical and describe both the parser and the builder. This eliminates the possibility of disparity between the parsing and building actions, and reduces the amount of code required to implement a format.
+    >>> format = Struct(
+    ...     "signature" / Const(b"BMP"),
+    ...     "width" / Int8ub,
+    ...     "height" / Int8ub,
+    ...     "pixels" / Array(this.width * this.height, Byte),
+    ... )
+    >>> format.build(dict(width=3,height=2,pixels=[7,8,9,11,12,13]))
+    b'BMP\x03\x02\x07\x08\t\x0b\x0c\r'
+    >>> format.parse(b'BMP\x03\x02\x07\x08\t\x0b\x0c\r')
+    Container(signature=b'BMP')(width=3)(height=2)(pixels=[7, 8, 9, 11, 12, 13])
 
-Library
--------
+A ``Sequence`` is a collection of ordered fields, and differs from ``Array`` and ``GreedyRange`` in that those two are homogenous::
 
-Construct is not a framework. It does not have any dependencies besides the Python standard library, and does not require users to adapt their code to its whims.
+    >>> format = Sequence(PascalString(Byte, "utf8"), GreedyRange(Byte))
+    >>> format.build([u"lalaland", [255,1,2]])
+    b'\nlalaland\xff\x01\x02'
+    >>> format.parse(b"\x004361789432197")
+    ['', [52, 51, 54, 49, 55, 56, 57, 52, 51, 50, 49, 57, 55]]
 
-What is Construct good for?
-===========================
 
 Construct has been used to parse:
 
- * Networking formats like IP, DNS, SSL
- * Binary file formats like Bitmaps, JPEG, PNG
- * Executable binaries formats like ELF32, PE32
- * Filesystem layouts like Ext2, Fat16, MBR
+* Networking formats like Ethernet, IP, ICMP, IGMP, TCP, UDP, DNS, DHCP
+* Binary file formats like Bitmaps, PNG, GIF, EMF, WMF
+* Executable binaries formats like ELF32, PE32
+* Filesystem layouts like Ext2, Fat16, MBR
 
-And many other things! Just look into the `examples <https://github.com/construct/construct/tree/master/construct/examples>`_ folder.
+See more examples in `current gallery <https://github.com/construct/construct/tree/master/gallery>`_ and in `deprecated gallery <https://github.com/construct/construct/tree/master/deprecated_examples>`_.
 
-What isn't Construct good at?
-=============================
 
-As previously mentioned, Construct is not a good choice for parsing text, due to the typical complexity of text-based grammars and the relative difficulty of parsing Unicode correctly. In the past, there was an experimental support for parsing text but it was dropped in version 2.5.
+Development and support
+-------------------------
+Please use `github issues <https://github.com/construct/construct/issues>`_ to ask general questions, make feature requests (and vote for them), report issues and bugs, and to submit PRs. Feel free to request any changes that would support your project. There is also a `gitter chat <https://gitter.im/construct-construct/Lobby>`_ but using Issues is highly recommended.
 
+Main documentation is at `readthedocs <http://construct.readthedocs.org>`_, which is substantial. Source is at `github <https://github.com/construct/construct>`_. Releases are available at `pypi <https://pypi.org/project/construct/>`_.
+
+
+Requirements
+--------------
+Construct should run on CPython 2.7 3.3 3.4 3.5 3.6 3.7 and PyPy 2.7 3.5 implementations. Recommended is CPython 3.6 and PyPy (any version) because they support ordered keyword arguments, and also PyPy achieves much better performance. Therefore PyPy would be most recommended.
+
+Enum34 is optional if you want Enum EnumFlags to take labels from IntEnum IntFlag.
+
+Numpy is optional, if you want to serialize arrays using Numpy protocol. Otherwise arrays can still be serialized using PrefixedArray.
+
+Arrow is optional, if you want to use Timestamp class.
+
+Different Python versions support different compression modules (like gzip lzma), if you want to use Compressed class.

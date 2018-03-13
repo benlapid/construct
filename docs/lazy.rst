@@ -2,70 +2,77 @@
 Lazy parsing
 ============
 
-.. note::
-
-    Certain constructs are available only for seekable streams (in-memory and files) and some require tellable streams (which in fact is a subset of seekability). Sockets and pipes do not support seeking, so you'll have to first read the data from the stream, and parse it in-memory, or use the :func:`~construct.core.Rebuffered` wrapper.
+.. warning:: This chapter is work in progress.
 
 
-Structs Sequences and Ranges
-----------------------------
+LazyStruct
+---------------
 
-Lazy* constructs allow lazy construction and deconstruction, meaning the data is actually parsed only when it's requested (demanded). Lazy parsing (also called on-demand parsing but that term is reserved here) is very useful with record-oriented data, where you don't have to actually parse the data unless it's actually needed. The result of parsing is a different container that remembers names of the members and their location in the stream, and when the data is accessed by key (or attribute for that matter) then that field is parsed. Members are parsed only once each.
+Equivalent to :class:`~construct.core.Struct`, but when this class is parsed, most fields are not parsed (they are skipped if their size can be measured by _actualsize or _sizeof method). See its docstring for details.
 
-Essentially almost every code that uses the base classes also works on these but there are few things that one has to be aware of when using lazy equivalents.
+Fields are parsed depending on some factors:
 
-`LazyStruct` works like Struct but parses into a LazyContainer.
+* Some fields like FormatField Bytes(5) Array(5,Byte) are fixed-size and are therefore skipped. Stream is not read.
+* Some fields like Bytes(this.field) are variable-size but their size is known during parsing when there is a corresponding context entry. Those fields are also skipped. Stream is not read.
+* Some fields like Prefixed PrefixedArray PascalString are variable-size but their size can be computed by partially reading the stream. Only first few bytes are read (the lengthfield).
+* Other fields like VarInt need to be parsed. Stream position that is left after the field was parsed is used.
+* Some fields may not work properly, due to the fact that this class attempts to skip fields, and parses them only out of necessity. Miscellaneous fields often have size defined as 0, and fixed sized fields are skippable.
 
-    Equivalent to Struct construct, however fixed size members are parsed on demend, others are parsed immediately. If entire struct is fixed size then entire parse is essentially one seek.
+Note there are restrictions:
 
-`LazySequence` works like Sequence but parses into a LazySequenceContainer.
+* If a field like Bytes(this.field) references another field in the same struct, you need to access the referenced field first (to trigger its parsing) and then you can access the Bytes field. Otherwise it would fail due to missing context entry.
+* If a field references another field within inner (nested) or outer (super) struct, things may break. Context is nested, but this class was not rigorously tested in that manner.
 
-    Equivalent to Sequence construct, however fixed size members are parsed on demend, others are parsed immediately. If entire sequence is fixed size then entire parse is essentially one seek.
-
-`LazyRange` works like Range but parses into a LazyRangeContainer.
-
-    Equivalent to Range construct, but members are parsed on demand. Works only with fixed size subcon.
-
-
-OnDemand
---------
-
-There is a different approach to lazy parsing, where only one field is made lazy. Parsing returns a parameterless lambda that when called, returns the parsed data. Right now, each time the lambda is called the object is parsed again, so it the inner subcon is non-deterministic, each parsing may return a different object. Builds from a parsed object or a lambda.
-
->>> OnDemand(Byte).parse(b"\xff")
-<function OnDemand._parse.<locals>.<lambda> at 0x7fdc241cfc80>
->>> _()
-255
->>> OnDemand(Byte).build(16)
-b'\x10'
-
-There is also OnDemandPointer class.
-
->>> OnDemandPointer(lambda ctx: 2, Byte).parse(b"\x01\x02\x03garbage")
-<function OnDemand._parse.<locals>.effectuate at 0x7f6f011ad510>
->>> _()
-3
+Building and sizeof are greedy, like in Struct.
 
 
 LazyBound
----------
+---------------
 
-A lazy-bound construct that binds to the construct only at runtime. Useful for recursive data structures (like linked lists or trees), where a construct needs to refer to itself (while it doesn't exist yet).
+Field that binds to the subcon only at runtime (during parsing and building, not ctor). Useful for recursive data structures, like linked-lists and trees, where a construct needs to refer to itself (while it does not exist yet in the namespace).
 
->>> st = Struct(
-...     "value"/Byte,
-...     "next"/If(this.value > 0, LazyBound(lambda ctx: st)),
-... )
-...
->>> st.parse(b"\x05\x09\x00")
-Container(value=5)(next=Container(value=9)(next=Container(value=0)(next=None)))
-...
->>> print(st.parse(b"\x05\x09\x00"))
-Container: 
-    value = 5
-    next = Container: 
-        value = 9
+Note that it is possible to obtain same effect without using this class, using a loop. However there are usecases where that is not possible (if remaining nodes cannot be sized-up, and there is data following the recursive structure). There is also a significant difference, namely that LazyBound actually does greedy parsing while the loop does lazy parsing. See examples.
+
+To break recursion, use `If` field. See examples.
+
+::
+
+    d = Struct(
+        "value" / Byte,
+        "next" / If(this.value > 0, LazyBound(lambda: d)),
+    )
+
+    >>> print(d.parse(b"\x05\x09\x00"))
+    Container: 
+        value = 5
         next = Container: 
-            value = 0
-            next = None
+            value = 9
+            next = Container: 
+                value = 0
+                next = None
 
+::
+
+    d = Struct(
+        "value" / Byte,
+        "next" / GreedyBytes,
+    )
+
+    data = b"\x05\x09\x00"
+    while data:
+        x = d.parse(data)
+        data = x.next
+        print(x)
+
+    # print outputs
+    Container: 
+        value = 5
+        next = \t\x00 (total 2)
+    # print outputs
+    Container: 
+        value = 9
+        next = \x00 (total 1)
+    # print outputs
+    Container: 
+        value = 0
+        next =  (total 0)

@@ -3,11 +3,9 @@ from time import sleep
 from sys import maxsize
 
 
-
 class RestreamedBytesIO(object):
-    __slots__ = ["substream", "encoder", "encoderunit", "decoder", "decoderunit", "rbuffer", "wbuffer","sincereadwritten"]
 
-    def __init__(self, substream, encoder, encoderunit, decoder, decoderunit):
+    def __init__(self, substream, decoder, decoderunit, encoder, encoderunit):
         self.substream = substream
         self.encoder = encoder
         self.encoderunit = encoderunit
@@ -23,7 +21,8 @@ class RestreamedBytesIO(object):
         while len(self.rbuffer) < count:
             data = self.substream.read(self.decoderunit)
             if data is None or len(data) == 0:
-                raise IOError("Restreamed cannot satisfy read request of %d bytes" % count)
+                # Restreamed cannot satisfy read request
+                return ""
             self.rbuffer += self.decoder(data)
         data, self.rbuffer = self.rbuffer[:count], self.rbuffer[count:]
         self.sincereadwritten += count
@@ -44,6 +43,9 @@ class RestreamedBytesIO(object):
         if len(self.wbuffer):
             raise ValueError("closing stream but %d unwritten bytes remain, %d is encoded unit" % (len(self.wbuffer), self.encoderunit))
 
+    def seek(self, at, whence=0):
+        raise IOError
+
     def seekable(self):
         return False
 
@@ -55,10 +57,7 @@ class RestreamedBytesIO(object):
         return True
 
 
-
-
 class RebufferedBytesIO(object):
-    __slots__ = ["substream","offset","rwbuffer","moved","tailcutoff"]
 
     def __init__(self, substream, tailcutoff=None):
         self.substream = substream
@@ -69,7 +68,7 @@ class RebufferedBytesIO(object):
 
     def read(self, count=None):
         if count is None:
-            raise ValueError("count must be an int, reading until EOF not supported")
+            raise ValueError("count must be integer, reading until EOF not supported")
         startsat = self.offset
         endsat = startsat + count
         if startsat < self.moved:
@@ -117,7 +116,7 @@ class RebufferedBytesIO(object):
             self.offset += at
             return self.offset
         else:
-            raise ValueError("seeks only with whence 0 and 1")
+            raise ValueError("this class seeks only with whence: 0 and 1 (excluded 2)")
 
     def seekable(self):
         return True
@@ -133,46 +132,3 @@ class RebufferedBytesIO(object):
 
     def cachedto(self):
         return self.moved + len(self.rwbuffer)
-
-
-
-class BoundBytesIO(object):
-    __slots__ = ["substream","start","size"]
-    def __init__(self, substream, available):
-        self.substream = substream
-        self.start = self.tell()
-        self.size = available
-
-    @property
-    def available(self):
-        return self.size - (self.tell() - self.start)
-
-    @property
-    def offset(self):
-        return self.substream.tell()
-
-    def read(self, count=maxsize):
-        avail = self.available
-        if avail == 0:
-            return b""
-        count = min(count, avail)
-        data = self.substream.read(count)
-        if len(data) < count:
-            raise IOError("could only read %s bytes, requested %s" % (len(data),count))
-        return data
-
-    def seekable(self):
-        return True
-
-    def seek(self, offset):
-        if offset < self.start or offset > self.start + self.size:
-            raise IOError("trying to seek out of bounds [%d-%d)" % (self.start, self.start + self.size))
-        self.substream.seek(offset)
-
-    def tell(self):
-        return self.offset
-
-    def tellable(self):
-        return True
-
-

@@ -22,13 +22,13 @@ So as of Construct 2.XX, all constructs work with bytes:
 * Can rely on python's built in struct module for numeric packing/unpacking (faster and tested)
 * Can directly parse from and build to file-like objects (without in-memory buffering)
 
-But how are we supposed to work with raw bits? The only difference is that we must explicitly declare that: certain fields like Bit Octet BitsInteger handle parsing and building bit strings. There are also few fields like Struct and Flag that work with both byte-strings and bit-strings.
+But how are we supposed to work with raw bits? The only difference is that we must explicitly declare that: certain fields like BitsInteger (Bit Nibble Octet are instances of BitsInteger) handle parsing and building of bit strings. There are also few fields like Struct and Flag that work with both byte-strings and bit-strings.
 
 
 BitStruct
 =========
 
-A BitStruct is a sequence of constructs that are parsed/built in the specified order, much like normal Structs. The difference is that BitStruct operates on bits rather than bytes. When parsing a BitStruct, the data is first converted to a bit stream (a stream of 1's and 0's), and only then is it fed to the subconstructs. The subconstructs are expected to operate on bits instead of bytes. For reference look at the code below:
+A BitStruct is a sequence of constructs that are parsed/built in the specified order, much like normal Structs. The difference is that BitStruct operates on bits rather than bytes. When parsing a BitStruct, the data is first converted to a bit stream (a stream of \\x01 and \\x00), and only then is it fed to the subconstructs. The subconstructs are expected to operate on bits instead of bytes. For reference look at the code below:
 
 >>> format = BitStruct(
 ...     "a" / Flag,
@@ -41,41 +41,53 @@ Container(a=True)(b=7)(c=887)(d=None)
 >>> format.sizeof()
 2
 
-.. note:: BitStruct is actually just a wrapper for the :func:`~construct.core.Bitwise` around a :func:`~construct.core.Struct` construct.
+BitStruct is actually just a wrapper for the :class:`~construct.core.Bitwise` around a :class:`~construct.core.Struct` .
 
 
 Important notes
 ===============
 
-* BitStructs are non-nestable so writing something like ``BitStruct("foo", BitStruct("bar", Octet("spam")))`` will not work. You can use regular Structs inside BitStructs.
-* BitStructs are embeddable. The ``Embedded`` wrapper can be used for that purpose. There is also the ``EmbeddedBitStruct``.
+* BitStructs are non-nestable (because Bitwise are not nestable) so writing something like ``BitStruct(BitStruct(Octet))`` will not work. You can use regular Structs inside BitStructs.
+* Byte aligned - The total size of the elements of a BitStruct must be a multiple of 8 (due to alignment issues). RestreamedBytesIO will raise an error if the amount of bits and bytes does not align properly.
+* Pointers and Lazy* - Do not place fields that do seeking/telling or lazy parsing inside bitwise because it uses an internal stream, so external stream offsets will turn out wrong, have unknown side-effects or raise exceptions.
+* Normal (byte-oriented) classes like Int* Float* can be used by wrapping in Bytewise. If you need to mix byte- and bit-oriented fields, you should use a BitStruct and Bytewise.
+* Advanced classes like tunneling may not work in bitwise context. Only basic fields like integers were throughly tested.
 
-* Byte aligned - The total size of the elements of a BitStruct must be a multiple of 8 (due to alignment issues). RestreamedBytesIO will raise an error of the amount of bits and bytes does not align properly.
-* Pointers and OnDemand - Do not place Pointers or OnDemands inside bitwise because it uses an internal stream, so external stream offsets will turn out wrong, have side-effects or raise exceptions.
+
+Fields that work with bits
+=============================
+
+::
+
+    Bit    <--> BitsInteger(1)
+    Nibble <--> BitsInteger(4)
+    Octet  <--> BitsInteger(8)
 
 
-Integers out of bits
-====================
+Fields that work with bytes
+=============================
 
-.. autofunction:: construct.BitsInteger
+Normal classes, that is those working with byte-streams, can be used on bit-streams by wrapping them with Bytewise. Its a wrapper that does the opposite of Bitwise, it transforms each 8 bits into 1 byte. The enclosing stream is a bit-stream but the subcon is provided a byte-stream.
 
-Convenience wrappers for BitsInteger
-------------------------------------
+::
 
-Bit
- A single bit
-Nibble
- A sequence of 4 bits (half a byte)
-Octet
- An sequence of 8 bits (byte)
+    >>> d = Bitwise(Struct(
+    ...     'a' / Nibble,
+    ...     'b' / Bytewise(Float32b),
+    ...     'c' / Padding(4),
+    ... ))
+    >>> d.parse(bytes(5))
+    Container(a=0)(b=0.0)(c=None)
+    >>> d.sizeof()
+    5
 
 
 Fields that do both
-===================
+=============================
 
-Most simple fields (such as Flag, Padding, Terminated, etc.) are ignorant to the granularity of the data they operate on. The actual granularity depends on the enclosing layers.
+Some simple fields (such as Flag Padding Pass Terminated) are ignorant to the granularity of the data they operate on. The actual granularity depends on the enclosing layers. Same applies to classes that are wrappers or adapters like Enum EnumFlags. Those classes do not care about granularity because they dont interact with the stream, its their subcons.
 
-Here's a snippet of code that operates on bytes:
+Here's a snippet of a code that operates on bytes:
 
 >>> format = Struct(
 ...     Padding(2),
@@ -85,7 +97,7 @@ Here's a snippet of code that operates on bytes:
 >>> format.build(dict(x=5))
 b'\x00\x00\x01\x00\x00\x00\x00\x00'
 
-And here's a snippet of code that operates on bits. The only difference is BitStruct in place of a normal Struct:
+And here's a snippet of a code that operates on bits. The only difference is BitStruct in place of a normal Struct:
 
 >>> format = BitStruct(
 ...     Padding(2),
@@ -96,4 +108,3 @@ And here's a snippet of code that operates on bits. The only difference is BitSt
 b' '
 
 So unlike "classical Construct", there's no need for BytePadding and BitPadding. If Padding is enclosed by a BitStruct, it operates on bits, otherwise, it operates on bytes.
-
